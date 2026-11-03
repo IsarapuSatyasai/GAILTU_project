@@ -1,0 +1,9 @@
+# Defines model and experiments
+resources:
+  models:
+    model:
+      name: ${var.model_name}
+      description: MLflow registered model for the ${var.project_name}" ML Project for ${bundle.target} deployment target.
+      permissions:
+        - level: CAN_READ
+          group_name: users

@@ -1,0 +1,67 @@
+bundle:
+  name: chain_GAILTU-FinancialSpreading
+
+variables:
+  project_name:
+    default: GAILTU-FinancialSpreading-${bundle.target}
+
+  model_name:
+    description: Model name for the model training.
+    default: ${var.project_name}
+
+  schema_name:
+    description: Schema name or the service.
+    default: ${var.project_name}
+
+  log_model_notebook_path:
+    description: The path where to find the notebook to be executed
+    default: ./${bundle.name}/src/log_chain.py
+
+  batch_inference_notebook_path:  #Change this source code to deploy your own job
+    description: The path to the notebook for batch inference.
+    default: ./utils/databricks_scripts/batch_inference.py
+
+  requirements_path:
+    description: The path towards the model requirements_path
+    default: ./utils/requirements.txt
+
+  experiment_name:
+    description: Experiment name for the model training.
+    default: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${var.model_name}
+
+  input:
+    description: Input variables needed for the batch inference job
+    default: '{ "source": "log-gailtuint-financialanalysis-input/annual report kuehne + nagel.pdf", "country_name": "Netherlands", "product_name": "Loans for Professional Customers", "local_product_name": "Financial Lease Pandrecht / Geldlening", "generated_report_language": "English" }'
+
+  batch_script_output_path:
+    description: The output path of the batch script
+    default: log-gailtuint-financialanalysis-output/output_example.html
+
+  webhook_notifications:
+    description: The name of the webhook trigger
+    default: ${var.webhook_notifications_credit}
+
+include:
+  - ../dabs-targets.yml
+  - ../dab_templates/ml_artifacts.yml
+  - ../dab_templates/log_lc_model.yml
+  - ../dab_templates/batch_inference_task.yml
+
+resources:
+  schemas:
+    AnnualReport_schema:
+      name: ${var.schema_name}
+      catalog_name: ${var.catalog_type}_${var.ci_code}_${var.environment_full_name}
+
+targets:
+  personal:
+    resources:
+      jobs:
+        batch_inference_job:
+          email_notifications:
+            on_failure:
+              - ${workspace.current_user.userName}
+        log_model_job:
+          email_notifications:
+            on_failure:
+              - ${workspace.current_user.userName}

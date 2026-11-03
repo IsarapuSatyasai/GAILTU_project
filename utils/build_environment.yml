@@ -1,0 +1,12 @@
+name: mlflow-genai-env-build
+channels: 
+  - conda-forge
+dependencies: 
+  - python=3.11
+  - pip
+  - pip: 
+      - -r full_requirements.txt
+      - pytest==8.4.1
+      - pandas==2.2.2
+
+  

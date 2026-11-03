@@ -1,0 +1,32 @@
+# The name of the bundle. run `databricks bundle schema` to see the full bundle settings schema.
+bundle:
+  name: monitor_GAILTU-Credit
+
+variables:
+  project_name:
+    default: GAILTU-Credit-${bundle.target}
+  schema_name:
+    default: ${var.project_name}
+  experiment_name:
+    default: /Workspace/Users/${workspace.current_user.userName}/.bundle/chain_GAILTU-Credit/GAILTU-Credit-${bundle.target}_UC
+  sql_warehouse_id:
+    default: d94299f7dcf31988
+  lookback_window:
+    default: 7
+  notebook_path:
+    description: The path to the notebook for batch inference
+    default: ../${bundle.name}/calculate_metrics.py
+
+
+include:
+  - ../dabs-targets.yml
+  - ../dab_templates/monitoring_task.yml
+
+targets:
+  personal:
+    resources:
+      jobs:
+        monitoring_job:
+          email_notifications:
+            on_failure:
+              - ${workspace.current_user.userName}

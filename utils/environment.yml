@@ -1,0 +1,9 @@
+name: mlflow-genai-env
+channels: 
+  - conda-forge
+dependencies: 
+  - python=3.11
+  - pip
+  - pip: 
+      - -r ../../utils/full_requirements.txt
+  

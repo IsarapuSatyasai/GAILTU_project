@@ -1,0 +1,207 @@
+sync:
+  paths:
+    - "./${bundle.name}"
+    - "./utils"
+    - "./dab_templates"
+
+
+variables:
+  environment_full_name:
+    default: dev
+  catalog_type:
+    default: private
+  ci_code:
+    default: gailtu
+  email_notifications:
+    default: []
+  webhook_notifications_sales:
+    default: []
+  webhook_notifications_credit:
+    default: [] 
+  internal_instance_pool_id:
+    default: 1105-132812-fly29-pool-uyld3f76
+  external_instance_pool_id:
+    default: 1105-132814-peach30-pool-4bsjb9o2
+  function_app_sp:
+    default: b6a9045e-9b15-459d-a11a-69e75ca8faf2
+  integration_sp:
+    default: 1789909a-0842-4e0b-ac23-6661222c727e
+
+  monitoring_job_cron:
+    default: '0 0 20 1 1 ? *' #once per year in januari
+  sql_warehouse_id:
+    default: 'd94299f7dcf31988'
+  tenant_id:
+    default: 07751f8b-9617-49d5-9024-85f034f400ec
+  client_id:
+    default: ''
+
+
+targets:
+  personal:
+    default: true
+    mode: development
+    variables:
+      environment_full_name: prd
+      monitoring_job_cron: '0 0 20 1 1 ? *' #once per year in januari
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      host: https://adb-1181149440878119.19.azuredatabricks.net
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    run_as:
+      user_name: ${workspace.current_user.userName}
+
+  build:
+    mode: production
+    variables:
+      environment_full_name: prd
+      monitoring_job_cron: '0 0 20 1 1 ? *' #once per year in januari
+
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      host: https://adb-1181149440878119.19.azuredatabricks.net
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    run_as:
+      service_principal_name: 927e84bd-3353-4f53-b804-1fbbe469b1ad
+
+
+
+  stage:
+    mode: production
+    variables:
+      environment_full_name: prd
+      monitoring_job_cron: '0 0 20 1 1 ? *' #once per year in januari
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      host: https://adb-1181149440878119.19.azuredatabricks.net
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    run_as:
+      service_principal_name: 927e84bd-3353-4f53-b804-1fbbe469b1ad
+
+
+
+  dev:
+    mode: production
+    variables:
+      environment_full_name: dev
+      catalog_type: public
+      ci_code: gaiep
+      external_instance_pool_id: 1112-130933-ashed235-pool-yvsrzpv6
+      internal_instance_pool_id: 1112-130930-euro264-pool-u420o6uq
+      function_app_sp: b6a9045e-9b15-459d-a11a-69e75ca8faf2
+      integration_sp: 1789909a-0842-4e0b-ac23-6661222c727e
+      monitoring_job_cron: '0 0 20 1 1 ? *' #once per year in januari
+      sql_warehouse_id: '9ebd1ecb4786ab6f'
+      webhook_notifications_sales: 
+        - id: a9b16ec5-6039-4028-8d5f-1af1039df792
+      webhook_notifications_credit: 
+        - id: b669075e-77df-408d-a2a7-3c4c3f3c52c0
+      client_id: 22c2187a-243f-4c74-a48b-1aefca2abadc
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      host: https://adb-589141230568371.11.azuredatabricks.net/
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    resources:
+      jobs:
+        batch_inference_job:
+          permissions:
+            - level: CAN_VIEW
+              group_name: users
+            - level: CAN_MANAGE
+              service_principal_name: ${var.function_app_sp}
+            - level: CAN_MANAGE
+              service_principal_name: ${var.integration_sp}
+    run_as:
+      service_principal_name: c1d9215a-689c-4545-8da8-314832abdb73
+ 
+
+  tst:
+    mode: production
+    variables:
+      environment_full_name: tst
+      catalog_type: public
+      ci_code: gaiep
+      external_instance_pool_id: 1112-131320-tipis118-pool-p2xv167m
+      internal_instance_pool_id: 1112-131316-pled184-pool-em8a31li
+      function_app_sp: c9a00258-71ec-41d4-a565-b3a83eaec663
+      integration_sp: 6a0e26b5-ceff-46bd-8cf0-ec296de7efb3
+      monitoring_job_cron: '0 0 20 1 1 ? *' #once per year in januari
+      sql_warehouse_id: '4d722d956ef5dd2b'
+      webhook_notifications_sales: 
+        - id: 0337fb71-0362-4169-970a-d2ed28bee186
+      webhook_notifications_credit: 
+        - id: 402e6fca-8a2a-4ba6-8033-8d9a3543a88e
+
+      client_id: 87a2329c-a1a4-4436-b87b-efc70be8826a
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      host: https://adb-2476926489169177.17.azuredatabricks.net/
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    run_as:
+      service_principal_name: 53766eab-f2c2-47e2-bc18-2d189ee9d2c9
+    
+
+
+  acc:
+    mode: production
+    variables:
+      environment_full_name: acc
+      catalog_type: public
+      ci_code: gaiep
+      email_notifications: fm.dll.openai.ltu@dllgroup.com
+      webhook_notifications_sales: 
+        - id: 571d5702-e17d-424c-83b2-12c529cc0370
+      webhook_notifications_credit: 
+        - id: 1cd0d31f-731e-4582-91a5-e07ea10ac666
+      external_instance_pool_id: 1112-134346-tapir267-pool-yk6tcfxu
+      internal_instance_pool_id: 1112-134343-tummy284-pool-lvwwbsfm
+      function_app_sp: 0de28269-93f5-48c4-8088-c66ad3342bcb
+      integration_sp: 85e9bb18-474f-4e0c-99e3-9ff45a93be7a
+      monitoring_job_cron: '0 0 20 ? * 7'  # every Sunday at 8PM
+      sql_warehouse_id: '961d122c26e2d65e'
+      client_id: e2f83272-aa0a-4b15-8433-6ded70376e64
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      host: https://adb-3864662576634243.3.azuredatabricks.net/
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    run_as:
+      service_principal_name: 46b9c8ba-f560-4e1a-ab97-898086dcbd83
+
+  prd:
+    mode: production
+    variables:
+      environment_full_name: prd
+      catalog_type: public
+      ci_code: gaiep
+      email_notifications: fm.dll.openai.ltu@dllgroup.com
+      webhook_notifications_sales: 
+        - id: 54192afd-4a96-46ff-80f9-01749ad2f4fb
+      webhook_notifications_credit: 
+        - id: 72d2e81d-0465-4e29-ba6d-f29432484640
+      external_instance_pool_id: 1112-134721-weigh96-pool-frk8peb6
+      internal_instance_pool_id: 1112-134717-baser285-pool-6wqdgrke
+      function_app_sp: 235a6437-749c-4402-9310-6ef916fdc326
+      integration_sp: fe5fd08b-297f-4279-bb72-79c386263fd9 
+      monitoring_job_cron: '0 0 20 ? * 7'  # every Sunday at 8PM
+      sql_warehouse_id: 'c25a6c659cf32ec9'
+      client_id: f4627116-d246-4c6b-a7fd-aea100d737b7
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+      host: https://adb-1193290270238907.7.azuredatabricks.net/
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    run_as:
+      service_principal_name: 1c6b61ea-3a29-407e-8dc1-8045a61f586d

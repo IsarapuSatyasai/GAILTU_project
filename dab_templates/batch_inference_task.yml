@@ -1,0 +1,53 @@
+resources:
+  jobs:
+    batch_inference_job:
+      name: ${var.project_name}-batch_inference_job
+      permissions:
+        - level: CAN_VIEW
+          group_name: users
+        - level: CAN_MANAGE
+          service_principal_name: ${var.integration_sp}
+      job_clusters:
+        - job_cluster_key: ${var.project_name}-batch_inference_job_cluster
+          new_cluster:
+            num_workers: 0
+            spark_conf:
+              "spark.databricks.cluster.profile": "singleNode"
+              "spark.master": "local[*, 4]"
+            instance_pool_id: ${var.external_instance_pool_id}
+            spark_version: 16.4.x-cpu-ml-scala2.13
+            custom_tags:
+              "ResourceClass": "SingleNode"
+            data_security_mode: "SINGLE_USER"
+      tasks:
+        - task_key: batch_inference
+          job_cluster_key: ${var.project_name}-batch_inference_job_cluster
+          notebook_task:
+            notebook_path: ../${var.batch_inference_notebook_path}
+            base_parameters:
+              input: ${var.input}
+              model_name: ${var.model_name}
+              catalog_type: ${var.catalog_type}
+              ci_code: ${var.ci_code}
+              schema_name: ${var.schema_name}
+              output_path: ${var.batch_script_output_path}
+              environment: ${bundle.target}
+              environment_full_name: ${var.environment_full_name}
+              experiment_name: ${var.experiment_name}
+              sql_warehouse_id: ${var.sql_warehouse_id}
+              client_id: ${var.client_id}
+              tenant_id: ${var.tenant_id}
+          libraries:
+            - requirements: ../${var.requirements_path}
+          max_retries: 1
+          min_retry_interval_millis: 180000
+      max_concurrent_runs: 2
+      email_notifications:
+        on_failure:
+          - ${var.email_notifications}
+
+      webhook_notifications:
+        on_success:
+          ${var.webhook_notifications}
+        on_failure:
+          ${var.webhook_notifications}

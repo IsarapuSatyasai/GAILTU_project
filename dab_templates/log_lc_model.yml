@@ -1,0 +1,35 @@
+resources:
+  jobs:
+    log_model_job:
+      name: ${var.project_name}-log-chain-job
+      permissions:
+        - level: CAN_VIEW
+          group_name: users
+      job_clusters:
+        - job_cluster_key: ${var.project_name}-log_model_job_cluster
+          new_cluster:
+            num_workers: 0
+            spark_conf:
+              "spark.databricks.cluster.profile": "singleNode"
+              "spark.master": "local[*, 4]"
+            instance_pool_id: ${var.internal_instance_pool_id}
+            spark_version: 16.4.x-cpu-ml-scala2.13
+            custom_tags:
+              "ResourceClass": "SingleNode"
+            data_security_mode: "SINGLE_USER"
+      tasks:
+        - task_key: log_model
+          job_cluster_key: ${var.project_name}-log_model_job_cluster
+          notebook_task:
+            notebook_path:  ../${var.log_model_notebook_path}
+            base_parameters:
+              model_name: ${var.model_name}
+              schema_name: ${var.schema_name}
+              catalog_type: ${var.catalog_type}
+              ci_code: ${var.ci_code}
+              experiment_name: ${var.experiment_name}
+              environment: ${bundle.target}
+              environment_full_name: ${var.environment_full_name}
+          libraries:
+            - requirements: ../${var.requirements_path}
+            
