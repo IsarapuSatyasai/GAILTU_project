@@ -15,7 +15,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install openpyxl==3.1.3
+# MAGIC %pip install --upgrade "openpyxl>=3.1.5"
 
 # COMMAND ----------
 
@@ -31,7 +31,6 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 
-# DBTITLE 1,Mount /mnt/projects to ADLS Gen2
 
 STORAGE_ACCOUNT_NAME = "mscstagailtuprd03"
 FOLDER_NAME = "projects"
@@ -81,7 +80,7 @@ for item in get_settings().paths:
 
 dbutils.widgets.text("mnt", "/mnt/projects/FinancialSpreading/", "Mount path")
 dbutils.widgets.text("template_path", "Test/creditlens_template_for_ai_model.xlsx", "Excel template file path")
-dbutils.widgets.text("pdf_file_name", "/NL/Adyen/CL Adyen NV_Jurgen Geerts.pdf", "PDF file name")
+dbutils.widgets.text("pdf_file_name", "/NL/Adyen/Adyenreport.pdf", "PDF file name")
 
 # COMMAND ----------
 
@@ -141,7 +140,7 @@ len(result['pdf_pages'])
 
 # COMMAND ----------
 
-result['source_language']
+result.get('source_language')
 
 # COMMAND ----------
 
@@ -149,7 +148,6 @@ len(result['selected_pages'])
 
 # COMMAND ----------
 
-# DBTITLE 1,Verify Excel output in Azure storage
 # Verify output Excel was written to Azure storage (abfss://)
 _pdf = result.get('pdf_file_name', '')
 _out = result.get('output_path', '')
@@ -187,7 +185,6 @@ def convert_answer(answer: str):
 
 # COMMAND ----------
 
-# DBTITLE 1,Convert list of variable/answer dicts to camelCase JSON
 
 # Convert entire list of answers to a single camelCase JSON object
 result_json = {
@@ -203,3 +200,12 @@ print(result.get("original_answers"))
 
 print("\nrefined answers:")
 print(result.get("refined_answers"))
+
+# COMMAND ----------
+
+print("Years:", result.get("years"))
+print("Answers count:", len(result.get("answers", [])))
+print("Errors:", result.get("errors"))
+print("use_rag:", result.get("use_rag"))
+print("rag_collection_name:", result.get("rag_collection_name"))
+print("selected_pages:", len(result.get("selected_pages", [])))

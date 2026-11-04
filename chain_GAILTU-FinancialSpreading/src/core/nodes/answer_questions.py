@@ -2,8 +2,8 @@
 
 Supports:
 - Full-context fallback (original behaviour)
-- Per-metric RAG retrieval
-- Richer source_text from retrieved chunks
+- RAG retrieval using the existing Credit chain components
+- Multi-year extraction
 """
 
 from typing import List, Dict, Any, Optional
@@ -17,23 +17,17 @@ from prompts.system_prompt import SYSTEM_PROMPT
 from prompts.user_prompt import get_user_prompt
 from models import MultiYearExtractionResponse
 from config import get_settings
-from custom_lcel_components.chains import get_sentence_window_rag_chain_from_config
+from rag_poc.extract import build_context, _norm
+from rag_poc.retrieve import build_page_index
+from nodes.select_pages import _to_page_record
 
-# Keep the same config as the RAG node
-RAG_CONFIG = {
-    "llm_model": "gpt-5.2",
-    "llm_model_agent": "gpt-5.4",
-    "temperature": 0,
-    "top_p": 1,
+# Retrieval config used when build_rag_index did not provide one
+DEFAULT_RAG_CONFIG = {
     "embedding_model_name": "text-embedding-3-large",
-    "pdf_loader_type": "PyMuPDFLoader",
-    "include_source": False,
-    "hybrid_search_args": None,
-    "remove_duplicate_chunks": True,
-    "sentence_chunker_window_size": 5,
     "similarity_top_k": 20,
-    "source_key": "selected_pages_source",
+    "sentence_chunker_window_size": 5,
     "rerank_args": {"top_n": 10, "model": "cross-encoder/ms-marco-MiniLM-L-2-v2"},
+    "source_key": "pdf_source",
 }
 
 def build_hyperlink(page_number: Optional[int], source_link: str) -> str:
@@ -45,19 +39,21 @@ def align_answers_to_template(
     excel_data: List[Dict[str, Any]],
     extracted_answers: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
+    # Match on normalised names: the LLM often drops trailing/non-breaking spaces from template
+    # names (e.g. "Depreciation\xa0"), which made exact matching silently turn real answers into N/A.
     answer_map = {
-        (a["worksheet"], a["variable"]): a
+        (_norm(a["worksheet"]), _norm(a["variable"])): a
         for a in extracted_answers
-        if (a["worksheet"], a["variable"]) in {
-            (m["worksheet"], m["variable"]) for m in excel_data
-        }
     }
 
     final_answers = []
     for metric in excel_data:
-        key = (metric["worksheet"], metric["variable"])
+        key = (_norm(metric["worksheet"]), _norm(metric["variable"]))
         answer = answer_map.get(key)
-        if answer is None:
+        if answer is not None:
+            # keep the template's exact names so validate_template_alignment passes
+            answer = {**answer, "worksheet": metric["worksheet"], "variable": metric["variable"]}
+        else:
             answer = {
                 "worksheet": metric["worksheet"],
                 "variable": metric["variable"],
@@ -127,29 +123,6 @@ def detect_years(selected_pages: List[Dict[str, Any]]) -> List[int]:
     top = [y for y, _ in candidates.most_common(2)]
     return sorted(top, reverse=True)
 
-def retrieve_context_for_metric(
-    rag_qa_chain,
-    collection_name: str,
-    metric: Dict[str, Any],
-    years: List,
-) -> str:
-    """Per-metric retrieval."""
-    query = (
-        f"Find the complete table or paragraph that contains the value for "
-        f"'{metric['variable']}' (description: {metric.get('description', '')}). "
-        f"Years of interest: {years}. "
-        f"Return the full surrounding context (complete table or paragraph), not just a single line."
-    )
-    try:
-        result = rag_qa_chain.invoke({
-            "question": query,
-            "collection_name": collection_name,
-        })
-        # Adjust key names to match what your RAG chain actually returns
-        return result.get("context") or result.get("source_documents") or result.get("answer") or ""
-    except Exception:
-        return ""
-
 def answer_questions(state: FinancialGraphState) -> dict:
     excel_data = state.get("excel_data", [])
     errors = list(state.get("errors", []))
@@ -179,35 +152,43 @@ def answer_questions(state: FinancialGraphState) -> dict:
     USER_PROMPT = get_user_prompt(excel_data)
 
     # ---------- Context building (RAG or full) ----------
+    alias_hints = ""
     if use_rag and rag_collection_name:
-        _, _, rag_qa_chain = get_sentence_window_rag_chain_from_config(RAG_CONFIG)
+        try:
+            rag_config = state.get("rag_config") or {
+                **DEFAULT_RAG_CONFIG,
+                "llm_model": settings.azure_openai_deployment,
+            }
+            # Physical PDF pages (1-based) so every retrieved passage gets inline [Page N] markers
+            # for the page it really comes from (the page stored in the index is often off).
+            pdf_pages = state.get("pdf_pages") or []
+            page_texts = {}
+            for i, page in enumerate(pdf_pages):
+                record = _to_page_record(page, i)
+                page_texts[record["page_number"]] = record["text"]
+            page_index = build_page_index(page_texts) if page_texts else None
 
-        # Per-metric retrieval (optional improvement)
-        metric_contexts = {}
-        for metric in excel_data:
-            ctx = retrieve_context_for_metric(rag_qa_chain, rag_collection_name, metric, years)
-            metric_contexts[(metric["worksheet"], metric["variable"])] = ctx
+            # Targeted alias queries (Other Labour Costs, General Costs, Depreciation, ...) + generic query
+            full_context, alias_hints, _ = build_context(
+                rag_collection_name, rag_config, excel_data, years, page_index=page_index
+            )
+        except Exception as exc:
+            errors.append(f"RAG retrieval failed, using selected pages instead: {exc}")
+            full_context = ""
 
-        # Combine retrieved contexts (deduplicated)
-        unique_contexts = []
-        seen = set()
-        for ctx in metric_contexts.values():
-            if ctx and ctx not in seen:
-                seen.add(ctx)
-                unique_contexts.append(ctx)
-
-        full_context = "\n\n--- Retrieved Context ---\n".join(unique_contexts) if unique_contexts else ""
         if not full_context:
-            # fallback inside RAG path
             full_context = "\n\n".join(
-                [f"--- PDF Page {p.get('page_number', i+1)} ---\n{p.get('text', '')}"
-                 for i, p in enumerate(selected_pages)]
+                [
+                    f"--- PDF Page {page.get('page_number', i + 1)} ---\n{page.get('text', '')}"
+                    for i, page in enumerate(selected_pages)
+                ]
             )
     else:
-        # Original full-context path
         full_context = "\n\n".join(
-            [f"--- PDF Page {p.get('page_number', i+1)} ---\n{p.get('text', '')}"
-             for i, p in enumerate(selected_pages)]
+            [
+                f"--- PDF Page {page.get('page_number', i + 1)} ---\n{page.get('text', '')}"
+                for i, page in enumerate(selected_pages)
+            ]
         )
 
     year_instruction = (
@@ -215,13 +196,16 @@ def answer_questions(state: FinancialGraphState) -> dict:
         "Do not include any other years. "
         "Return one answer object per variable per year. "
         "Include the year field on every answer. "
-        "Return numeric answers exactly as they appear in the source document, including thousand separators (e.g. 13,950). "
+        "Return numeric answers with digits and thousand separators exactly as they appear (e.g. 13,950); "
+        "apply the sign convention of the system prompt (costs/expenses positive, no parentheses). "
         "Do not remove commas or convert to plain integers. "
-        "For source_text, return the COMPLETE table or paragraph from the context that you used (not just a single line)."
+        "For source_text, return the COMPLETE table or paragraph from the context that you used (not just a single line). "
+        "Prefer the primary consolidated statements over notes or company-only statements when both show the figure."
         if years != [None]
         else (
             "Extract the most recent period available. "
-            "Return numeric answers exactly as they appear in the source document, including thousand separators. "
+            "Return numeric answers with digits and thousand separators exactly as they appear; "
+            "apply the sign convention of the system prompt (costs/expenses positive, no parentheses). "
             "For source_text, return the COMPLETE table or paragraph from the context that you used."
         )
     )
@@ -229,8 +213,11 @@ def answer_questions(state: FinancialGraphState) -> dict:
     user_content = (
         f"Please extract the following variables:\n{USER_PROMPT}\n\n"
         f"{year_instruction}\n\n"
-        "Use only the supplied document context. "
-        "For page_number, return the physical PDF page number shown in the context header.\n\n"
+        + (f"Line-item aliases (use these to map report labels to template variables):\n{alias_hints}\n\n" if alias_hints else "")
+        + "Use only the supplied document context. "
+        "For page_number, return the physical PDF page number: the context has [Page N] markers "
+        "(text after a marker comes from page N until the next marker) or '--- PDF Page N ---' headers; "
+        "use the nearest one before the line the value was taken from.\n\n"
         f"Document context:\n{full_context}\n\n"
     )
 

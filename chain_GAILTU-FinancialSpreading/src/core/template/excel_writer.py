@@ -39,11 +39,10 @@ def excel_write(dataframes:dict[str, pd.DataFrame], output_path:str, overwrite: 
 
                 wrap_columns = set()
                 for idx, col in enumerate(data.columns, 1):
-                    try:
-                        col_lengths = data[col].astype(str).map(lambda x: len(x) if isinstance(x, str) else 0)
-                        max_length = max(col_lengths.max() if not col_lengths.empty else 0, len(str(col)))
-                    except Exception:
-                        max_length = len(str(col))
+                    max_length = max(
+                        data[col].astype(str).map(len).max(),
+                        len(str(col))
+                    )
                     adjusted_length = max_length + 3
                     worksheet.column_dimensions[get_column_letter(idx)].width = min(adjusted_length, 50)
                     if adjusted_length > 50:
