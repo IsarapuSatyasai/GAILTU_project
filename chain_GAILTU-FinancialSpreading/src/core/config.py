@@ -55,22 +55,12 @@ class Settings:
     llm_top_p: float = 1.0
     llm_seed: int = 1234
 
-    # --- RAG settings ---
-    rag_embedding_model: str = "text-embedding-3-large"
-    rag_sentence_window_size: int = 5
-    rag_similarity_top_k: int = 20
-    rag_rerank_top_n: int = 10
-    rag_rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-2-v2"
-    rag_source_key: str = "pdf_source"
-    rag_pdf_loader_type: str = "PyMuPDFLoader"
-    rag_remove_duplicate_chunks: bool = True
-
     # --- Page selection ---
     first_n_pages = 5
     page_score_threshold = 1
     min_pages = 30
-    max_selected_pages = 10
-    max_adjacent_pages = 2
+    max_selected_pages = 25
+    max_adjacent_pages = 5
     refinement_attempts = 0
 
     # first_n_pages = 75

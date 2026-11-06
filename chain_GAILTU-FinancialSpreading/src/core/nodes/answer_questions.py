@@ -1,9 +1,7 @@
 """Node: Answer Questions using LLM.
 
-Supports:
-- Full-context fallback (original behaviour)
-- RAG retrieval using the existing Credit chain components
-- Multi-year extraction
+Iterates over each Excel row and extracts the corresponding financial
+data point from the PDF context and added source hyperlink.
 """
 
 from typing import List, Dict, Any, Optional
@@ -17,43 +15,50 @@ from prompts.system_prompt import SYSTEM_PROMPT
 from prompts.user_prompt import get_user_prompt
 from models import MultiYearExtractionResponse
 from config import get_settings
-from rag_poc.extract import build_context, _norm
-from rag_poc.retrieve import build_page_index
-from nodes.select_pages import _to_page_record
 
-# Retrieval config used when build_rag_index did not provide one
-DEFAULT_RAG_CONFIG = {
-    "embedding_model_name": "text-embedding-3-large",
-    "similarity_top_k": 20,
-    "sentence_chunker_window_size": 5,
-    "rerank_args": {"top_n": 10, "model": "cross-encoder/ms-marco-MiniLM-L-2-v2"},
-    "source_key": "pdf_source",
-}
 
 def build_hyperlink(page_number: Optional[int], source_link: str) -> str:
+    """Helper function applying the exact Excel HYPERLINK formula logic."""
     if page_number is not None and page_number != -1 and source_link:
         return f'=HYPERLINK("{source_link}#page={page_number}", "Page {page_number}")'
     return "N/A"
+
 
 def align_answers_to_template(
     excel_data: List[Dict[str, Any]],
     extracted_answers: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    # Match on normalised names: the LLM often drops trailing/non-breaking spaces from template
-    # names (e.g. "Depreciation\xa0"), which made exact matching silently turn real answers into N/A.
+    """Align extracted answers with the existing Excel template metrics."""
+
     answer_map = {
-        (_norm(a["worksheet"]), _norm(a["variable"])): a
-        for a in extracted_answers
+        (
+            answer["worksheet"],
+            answer["variable"],
+        ): answer
+        for answer in extracted_answers
+        if (
+            answer["worksheet"],
+            answer["variable"],
+        ) in {
+            (
+                metric["worksheet"],
+                metric["variable"],
+            )
+            for metric in excel_data
+        }
     }
 
     final_answers = []
+
     for metric in excel_data:
-        key = (_norm(metric["worksheet"]), _norm(metric["variable"]))
+        key = (
+            metric["worksheet"],
+            metric["variable"],
+        )
+
         answer = answer_map.get(key)
-        if answer is not None:
-            # keep the template's exact names so validate_template_alignment passes
-            answer = {**answer, "worksheet": metric["worksheet"], "variable": metric["variable"]}
-        else:
+
+        if answer is None:
             answer = {
                 "worksheet": metric["worksheet"],
                 "variable": metric["variable"],
@@ -66,69 +71,138 @@ def align_answers_to_template(
                 "source_heading": None,
                 "source_text": None,
             }
+
         final_answers.append(answer)
+
     return final_answers
 
-def validate_template_alignment(excel_data, answers) -> None:
-    template_keys = {(m["worksheet"], m["variable"]) for m in excel_data}
-    answer_keys = {(a["worksheet"], a["variable"]) for a in answers}
-    if template_keys != answer_keys:
-        raise ValueError(
-            f"Template alignment failed. Missing: {template_keys - answer_keys}. "
-            f"New: {answer_keys - template_keys}."
+
+def validate_template_alignment(
+    excel_data: List[Dict[str, Any]],
+    answers: List[Dict[str, Any]],
+) -> None:
+    """Validate that final answers exactly match template metrics."""
+
+    template_keys = {
+        (
+            metric["worksheet"],
+            metric["variable"],
         )
-    if len(excel_data) != len(answers):
+        for metric in excel_data
+    }
+
+    answer_keys = {
+        (
+            answer["worksheet"],
+            answer["variable"],
+        )
+        for answer in answers
+    }
+
+    if template_keys != answer_keys:
+        missing_metrics = template_keys - answer_keys
+        new_metrics = answer_keys - template_keys
+
         raise ValueError(
-            f"Metric count mismatch. Template: {len(excel_data)}, Answers: {len(answers)}."
+            f"Template alignment failed. "
+            f"Missing metrics: {missing_metrics}. "
+            f"New metrics: {new_metrics}."
         )
 
+    if len(excel_data) != len(answers):
+        raise ValueError(
+            f"Metric count mismatch. "
+            f"Template: {len(excel_data)}, "
+            f"Answers: {len(answers)}."
+        )
+
+
 def detect_years(selected_pages: List[Dict[str, Any]]) -> List[int]:
+    """Detect fiscal years from any PDF format.
+
+    Handles annual reports, CreditLens summaries, and other layouts.
+    Ignores preparation and print dates so they are not treated as fiscal years.
+    """
     candidates = Counter()
+
     year_patterns = [
+        # "December 31, 2024" / "December 31 2024"
         r"(?:december|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?)\s+\d{1,2},?\s*(20[1-3]\d)",
+        # "12/31/2024" / "31/12/2024" / "2024-12-31"
         r"(?:^|\s)(?:\d{1,2}[/-]\d{1,2}[/-]|20[1-3]\d[/-]\d{1,2}[/-])(20[1-3]\d)",
+        # "years ended 2024" / "year ended 2024"
         r"(?:years?|period)\s+ended\s+(20[1-3]\d)",
+        # "as at 2024" / "as of 2024"
         r"(?:as\s+(?:at|of))\s+(20[1-3]\d)",
+        # Standalone 4-digit years near financial context
         r"\b(20[1-3]\d)\b",
     ]
+
     financial_context = [
-        "balance sheet", "income statement", "cash flow", "statement of",
-        "financial", "assets", "liabilities", "revenue", "net income",
-        "total assets", "summary", "creditlens", "rabodet", "statement date",
+        "balance sheet",
+        "income statement",
+        "cash flow",
+        "statement of",
+        "financial",
+        "assets",
+        "liabilities",
+        "revenue",
+        "net income",
+        "total assets",
+        "summary",
+        "creditlens",
+        "rabodet",
+        "statement date",
     ]
+
+    # Context that indicates a non-fiscal year (preparation, print, generation)
     ignore_context = [
-        "prepared:", "prepared ", "printed:", "print date",
-        "generated:", "generated ", "exported:", "exported ",
+        "prepared:",
+        "prepared ",
+        "printed:",
+        "print date",
+        "generated:",
+        "generated ",
+        "exported:",
+        "exported ",
     ]
 
     for page in selected_pages:
         text = page.get("text", "") or ""
         lower = text.lower()
+
+        # Skip pages with no financial signal
         if not any(ctx in lower for ctx in financial_context):
             continue
+
         for pattern in year_patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
                 year = int(match.group(1))
                 if not (2010 <= year <= 2035):
                     continue
+
+                # Check surrounding text for ignore context
                 start = max(0, match.start() - 40)
                 end = min(len(lower), match.end() + 10)
                 nearby = lower[start:end]
+
                 if any(ctx in nearby for ctx in ignore_context):
                     continue
+
                 candidates[year] += 1
 
     if not candidates:
         return []
+
+    # Return the two most common years, newest first
     top = [y for y, _ in candidates.most_common(2)]
     return sorted(top, reverse=True)
+
 
 def answer_questions(state: FinancialGraphState) -> dict:
     excel_data = state.get("excel_data", [])
     errors = list(state.get("errors", []))
     selected_pages = state.get("selected_pages", [])
-    use_rag = state.get("use_rag", False)
-    rag_collection_name = state.get("rag_collection_name")
 
     if not selected_pages:
         empty = align_answers_to_template(excel_data, [])
@@ -137,10 +211,14 @@ def answer_questions(state: FinancialGraphState) -> dict:
             "answers": empty,
             "answers_by_year": {},
             "years": [],
-            "errors": errors + ["Extraction skipped because no template-relevant pages were selected."],
+            "errors": errors + [
+                "Extraction skipped because no template-relevant pages were selected."
+            ],
         }
 
-    years = detect_years(selected_pages) or [None]
+    years = detect_years(selected_pages)
+    if not years:
+        years = [None]
 
     llm = state.get("llm")
     structured_llm = llm.with_structured_output(MultiYearExtractionResponse)
@@ -151,73 +229,29 @@ def answer_questions(state: FinancialGraphState) -> dict:
 
     USER_PROMPT = get_user_prompt(excel_data)
 
-    # ---------- Context building (RAG or full) ----------
-    alias_hints = ""
-    if use_rag and rag_collection_name:
-        try:
-            rag_config = state.get("rag_config") or {
-                **DEFAULT_RAG_CONFIG,
-                "llm_model": settings.azure_openai_deployment,
-            }
-            # Physical PDF pages (1-based) so every retrieved passage gets inline [Page N] markers
-            # for the page it really comes from (the page stored in the index is often off).
-            pdf_pages = state.get("pdf_pages") or []
-            page_texts = {}
-            for i, page in enumerate(pdf_pages):
-                record = _to_page_record(page, i)
-                page_texts[record["page_number"]] = record["text"]
-            page_index = build_page_index(page_texts) if page_texts else None
-
-            # Targeted alias queries (Other Labour Costs, General Costs, Depreciation, ...) + generic query
-            full_context, alias_hints, _ = build_context(
-                rag_collection_name, rag_config, excel_data, years, page_index=page_index
-            )
-        except Exception as exc:
-            errors.append(f"RAG retrieval failed, using selected pages instead: {exc}")
-            full_context = ""
-
-        if not full_context:
-            full_context = "\n\n".join(
-                [
-                    f"--- PDF Page {page.get('page_number', i + 1)} ---\n{page.get('text', '')}"
-                    for i, page in enumerate(selected_pages)
-                ]
-            )
-    else:
-        full_context = "\n\n".join(
-            [
-                f"--- PDF Page {page.get('page_number', i + 1)} ---\n{page.get('text', '')}"
-                for i, page in enumerate(selected_pages)
-            ]
-        )
+    full_context = "\n\n".join(
+        [
+            f"--- PDF Page {page.get('page_number', i + 1)} ---\n{page.get('text', '')}"
+            for i, page in enumerate(selected_pages)
+        ]
+    )
 
     year_instruction = (
         f"Extract every variable only for these years: {years}. "
         "Do not include any other years. "
         "Return one answer object per variable per year. "
         "Include the year field on every answer. "
-        "Return numeric answers with digits and thousand separators exactly as they appear (e.g. 13,950); "
-        "apply the sign convention of the system prompt (costs/expenses positive, no parentheses). "
-        "Do not remove commas or convert to plain integers. "
-        "For source_text, return the COMPLETE table or paragraph from the context that you used (not just a single line). "
-        "Prefer the primary consolidated statements over notes or company-only statements when both show the figure."
+        "Return numeric answers exactly as they appear in the source document, including thousand separators (e.g. 13,950). Do not remove commas or convert to plain integers."
         if years != [None]
-        else (
-            "Extract the most recent period available. "
-            "Return numeric answers with digits and thousand separators exactly as they appear; "
-            "apply the sign convention of the system prompt (costs/expenses positive, no parentheses). "
-            "For source_text, return the COMPLETE table or paragraph from the context that you used."
-        )
+        else "Extract the most recent period available. "
+            "Return numeric answers exactly as they appear in the source document, including thousand separators."
     )
 
     user_content = (
         f"Please extract the following variables:\n{USER_PROMPT}\n\n"
         f"{year_instruction}\n\n"
-        + (f"Line-item aliases (use these to map report labels to template variables):\n{alias_hints}\n\n" if alias_hints else "")
-        + "Use only the supplied document context. "
-        "For page_number, return the physical PDF page number: the context has [Page N] markers "
-        "(text after a marker comes from page N until the next marker) or '--- PDF Page N ---' headers; "
-        "use the nearest one before the line the value was taken from.\n\n"
+        "Use only the supplied document context. "
+        "For page_number, return the physical PDF page number shown in the context header.\n\n"
         f"Document context:\n{full_context}\n\n"
     )
 
@@ -238,7 +272,10 @@ def answer_questions(state: FinancialGraphState) -> dict:
             if years != [None] and answer.year not in years:
                 continue
 
-            answer.source_link = build_hyperlink(answer.page_number, source_link)
+            answer.source_link = build_hyperlink(
+                answer.page_number,
+                source_link,
+            )
             year_key = answer.year if answer.year is not None else years[0]
             answers_by_year[year_key].append(answer.model_dump())
 
